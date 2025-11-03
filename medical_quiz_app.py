@@ -23,7 +23,7 @@ excel_path = os.path.join(BASE_DIR, "medical_terms.xlsx")
 try:
     data = load_data(excel_path)
 except FileNotFoundError:
-    st.error("⚠️ '의학용어정리.xlsx' 파일이 같은 폴더에 필요합니다.")
+    st.error("⚠️ 'medical_terms.xlsx' 파일이 같은 폴더에 필요합니다.")
     st.stop()
 
 # ===== 문제 생성 함수 =====
