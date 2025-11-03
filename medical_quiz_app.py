@@ -2,6 +2,7 @@
 import streamlit as st
 import pandas as pd
 import random
+import os
 
 # ===== 데이터 불러오기 =====
 @st.cache_data
@@ -13,6 +14,17 @@ def load_data(path):
         df = df.dropna(subset=["용어", "뜻"])
         sections[sheet] = list(zip(df["용어"], df["뜻"]))
     return sections
+
+# ===== 파일 경로 설정 (중요) =====
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+excel_path = os.path.join(BASE_DIR, "의학용어정리.xlsx")
+
+# ===== 엑셀 불러오기 =====
+try:
+    data = load_data(excel_path)
+except FileNotFoundError:
+    st.error("⚠️ '의학용어정리.xlsx' 파일이 같은 폴더에 필요합니다.")
+    st.stop()
 
 # ===== 문제 생성 함수 =====
 def make_question(terms):
@@ -30,14 +42,9 @@ def make_question(terms):
     random.shuffle(options)
     return question, options, answer, direction
 
-# ===== UI =====
-st.title("💊 의학용어 퀴즈")
 
-try:
-    data = load_data("의학용어정리.xlsx")
-except FileNotFoundError:
-    st.error("⚠️ '의학용어정리.xlsx' 파일이 같은 폴더에 필요합니다.")
-    st.stop()
+# ===== UI 시작 =====
+st.title("💊 의학용어 퀴즈")
 
 sections = list(data.keys()) + ["전체 랜덤"]
 
@@ -85,7 +92,6 @@ if st.session_state.phase == "question":
 
     choice = st.radio("정답을 선택하세요:", st.session_state.opts, key=f"choice_{idx}")
 
-    # ---- 정답 확인 후 즉시 '다음 문제로' 버튼도 같이 표시 ----
     if st.button("정답 확인"):
         st.session_state.checked = True
         if choice == st.session_state.ans:
@@ -93,7 +99,7 @@ if st.session_state.phase == "question":
             st.session_state.score += 1
         else:
             st.error(f"❌ 오답입니다. 정답은 [{st.session_state.ans}] 입니다.")
-        st.session_state.show_next = True  # 다음 버튼 표시 상태 플래그
+        st.session_state.show_next = True
 
     if st.session_state.get("checked", False) and st.session_state.get("show_next", False):
         if st.button("➡️ 다음 문제로"):
