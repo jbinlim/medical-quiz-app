@@ -1,4 +1,3 @@
-
 import streamlit as st
 import pandas as pd
 import random
@@ -15,7 +14,7 @@ def load_data(path):
         sections[sheet] = list(zip(df["용어"], df["뜻"]))
     return sections
 
-# ===== 파일 경로 설정 (중요) =====
+# ===== 파일 경로 설정 (영문 파일명으로 변경) =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 excel_path = os.path.join(BASE_DIR, "medical_terms.xlsx")
 
@@ -90,17 +89,28 @@ if st.session_state.phase == "question":
     st.write(f"### 문제 {idx+1} / {total}")
     st.subheader(f"{st.session_state.q} → ({st.session_state.dir})")
 
-    choice = st.radio("정답을 선택하세요:", st.session_state.opts, key=f"choice_{idx}")
+    # ✅ 기본 선택 해제 (index=None)
+    choice = st.radio(
+        "정답을 선택하세요:",
+        st.session_state.opts,
+        key=f"choice_{idx}",
+        index=None
+    )
 
+    # ✅ 정답 확인 로직
     if st.button("정답 확인"):
-        st.session_state.checked = True
-        if choice == st.session_state.ans:
-            st.success("✅ 정답입니다!")
-            st.session_state.score += 1
+        if choice is None:
+            st.warning("⚠️ 먼저 정답을 선택하세요!")
         else:
-            st.error(f"❌ 오답입니다. 정답은 [{st.session_state.ans}] 입니다.")
-        st.session_state.show_next = True
+            st.session_state.checked = True
+            if choice == st.session_state.ans:
+                st.success("✅ 정답입니다!")
+                st.session_state.score += 1
+            else:
+                st.error(f"❌ 오답입니다. 정답은 [{st.session_state.ans}] 입니다.")
+            st.session_state.show_next = True
 
+    # 다음 문제로 이동
     if st.session_state.get("checked", False) and st.session_state.get("show_next", False):
         if st.button("➡️ 다음 문제로"):
             st.session_state.checked = False
