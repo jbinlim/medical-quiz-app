@@ -17,7 +17,7 @@ def load_data(path):
 
 # ===== 파일 경로 설정 (중요) =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-excel_path = os.path.join(BASE_DIR, "의학용어정리.xlsx")
+excel_path = os.path.join(BASE_DIR, "medical_terms.xlsx")
 
 # ===== 엑셀 불러오기 =====
 try:
