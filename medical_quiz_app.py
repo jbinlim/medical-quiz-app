@@ -2,19 +2,57 @@ import streamlit as st
 import pandas as pd
 import random
 import os
+import re
 
-# ===== 데이터 불러오기 =====
+# ==============================
+# 📘 데이터 로드
+# ==============================
 @st.cache_data
 def load_data(path):
-    xls = pd.ExcelFile(path, engine='openpyxl')
-    sections = {}
+    """엑셀 파일의 모든 시트를 불러와 dict로 반환"""
+    xls = pd.ExcelFile(path, engine="openpyxl")
+    data = {}
     for sheet in xls.sheet_names:
-        df = pd.read_excel(xls, sheet_name=sheet)
-        df = df.dropna(subset=["용어", "뜻"])
-        sections[sheet] = list(zip(df["용어"], df["뜻"]))
-    return sections
+        df = pd.read_excel(xls, sheet_name=sheet).dropna(subset=["용어", "뜻"])
+        data[sheet] = list(zip(df["용어"].astype(str), df["뜻"].astype(str)))
+    return data
 
-# ===== 파일 경로 설정 (영문 파일명으로 변경) =====
+
+# ==============================
+# 🧠 유틸 함수
+# ==============================
+def normalize(s: str):
+    """비교용 문자열 정규화"""
+    return re.sub(r"\s+", "", s.strip().lower())
+
+
+def make_question(terms, mode):
+    """문제 생성"""
+    eng, kor = random.choice(terms)
+    if mode == "주관식 (직접 입력)":
+        return kor, eng, "영문 용어"
+    elif random.choice([True, False]):
+        return eng, kor, "뜻"
+    else:
+        return kor, eng, "용어"
+
+
+def check_answer(choice, correct, mode):
+    """정답 여부 판별"""
+    if not choice:
+        return None
+    if mode == "객관식 (4지선다)":
+        return choice == correct
+    else:
+        return normalize(choice) == normalize(correct)
+
+
+# ==============================
+# 🩺 메인 실행
+# ==============================
+st.title("💊 의학용어 퀴즈")
+
+# ===== 파일 경로 =====
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 excel_path = os.path.join(BASE_DIR, "medical_terms.xlsx")
 
@@ -25,108 +63,155 @@ except FileNotFoundError:
     st.error("⚠️ 'medical_terms.xlsx' 파일이 같은 폴더에 필요합니다.")
     st.stop()
 
-# ===== 문제 생성 함수 =====
-def make_question(terms):
-    eng, kor = random.choice(terms)
-    mode = random.choice(["eng_to_kor", "kor_to_eng"])
-    if mode == "eng_to_kor":
-        question, answer, pool, direction = eng, kor, [t[1] for t in terms], "뜻"
-    else:
-        question, answer, pool, direction = kor, eng, [t[0] for t in terms], "용어"
-    options = [answer]
-    while len(options) < 4:
-        fake = random.choice(pool)
-        if fake not in options:
-            options.append(fake)
-    random.shuffle(options)
-    return question, options, answer, direction
+# ==============================
+# 🎬 세션 상태 초기화
+# ==============================
+default_state = {
+    "phase": "setup",
+    "terms": [],
+    "cur_idx": 0,
+    "score": 0,
+    "mode": "",
+    "feedback": "",
+    "answered": False,
+    "wrong_list": [],
+}
+for k, v in default_state.items():
+    st.session_state.setdefault(k, v)
 
 
-# ===== UI 시작 =====
-st.title("💊 의학용어 퀴즈")
-
-sections = list(data.keys()) + ["전체 랜덤"]
-
-# ===== 세션 초기화 =====
-if "phase" not in st.session_state:
-    st.session_state.phase = "setup"  # setup → question → result
-if "checked" not in st.session_state:
-    st.session_state.checked = False
-
-# ===== 초기 설정 =====
+# ==============================
+# ⚙️ 퀴즈 설정
+# ==============================
 if st.session_state.phase == "setup":
-    section_choice = st.selectbox("단원을 선택하세요:", sections)
-    num_q = st.number_input("출제할 문제 수:", 1, 100, 10, 1)
-    if st.button("퀴즈 시작"):
-        if section_choice == "전체 랜덤":
-            st.session_state.terms = [t for sec in data.values() for t in sec]
-        else:
-            st.session_state.terms = data[section_choice]
-        random.shuffle(st.session_state.terms)
-        st.session_state.num_q = num_q
-        st.session_state.cur_q = 0
-        st.session_state.score = 0
-        st.session_state.phase = "question"
-        st.session_state.checked = False
-        st.session_state.q = None
+    section = st.selectbox("📚 단원 선택:", list(data.keys()) + ["전체 랜덤"])
+    mode = st.radio("🎯 출제 모드 선택:", ["객관식 (4지선다)", "주관식 (직접 입력)"])
+    scope = st.radio("📏 문제 범위:", ["전체 단원", "직접 개수 지정"])
+
+    num_q = (
+        st.number_input("출제할 문제 수:", 1, 200, 10, 1)
+        if scope == "직접 개수 지정"
+        else None
+    )
+
+    if st.button("시작하기 ▶️"):
+        terms = [t for sec in data.values() for t in sec] if section == "전체 랜덤" else data[section]
+        random.shuffle(terms)
+        if num_q:
+            terms = terms[:num_q]
+
+        st.session_state.update({
+            "phase": "quiz",
+            "terms": terms,
+            "mode": mode,
+            "cur_idx": 0,
+            "score": 0,
+            "wrong_list": [],
+            "feedback": "",
+            "answered": False,
+        })
         st.rerun()
 
-# ===== 퀴즈 =====
-if st.session_state.phase == "question":
-    total = st.session_state.num_q
-    idx = st.session_state.cur_q
+
+# ==============================
+# 🧩 퀴즈 로직
+# ==============================
+if st.session_state.phase == "quiz":
     terms = st.session_state.terms
+    total = len(terms)
+    idx = st.session_state.cur_idx
 
     if idx >= total:
         st.session_state.phase = "result"
         st.rerun()
 
-    if st.session_state.q is None:
-        q, opts, ans, dir = make_question(terms)
-        st.session_state.q, st.session_state.opts = q, opts
-        st.session_state.ans, st.session_state.dir = ans, dir
+    # 새 문제 설정
+    if "q_data" not in st.session_state or not st.session_state.answered:
+        q, ans, direction = make_question(terms, st.session_state.mode)
+        st.session_state.q_data = {"q": q, "ans": ans, "dir": direction}
 
-    st.write(f"### 문제 {idx+1} / {total}")
-    st.subheader(f"{st.session_state.q} → ({st.session_state.dir})")
+    q, ans, direction = st.session_state.q_data.values()
 
-    # ✅ 기본 선택 해제 (index=None)
-    choice = st.radio(
-        "정답을 선택하세요:",
-        st.session_state.opts,
-        key=f"choice_{idx}",
-        index=None
-    )
+    st.markdown(f"### 문제 {idx+1} / {total}")
+    st.subheader(f"{q} → ({direction})")
 
-    # ✅ 정답 확인 로직
-    if st.button("정답 확인"):
-        if choice is None:
-            st.warning("⚠️ 먼저 정답을 선택하세요!")
+    # 보기 설정
+    if st.session_state.mode == "객관식 (4지선다)":
+        pool = [a[1] if direction == "뜻" else a[0] for a in terms]
+        options = [ans] + random.sample([p for p in pool if p != ans], min(3, len(pool) - 1))
+        random.shuffle(options)
+        choice = st.radio("정답을 선택하세요:", options, index=None)
+    else:
+        choice = st.text_input("영문 용어를 입력하세요:").strip() or None
+
+    # 정답 확인
+    confirm = st.button("정답 확인") or (st.session_state.mode == "주관식 (직접 입력)" and choice)
+
+    if confirm and not st.session_state.answered:
+        st.session_state.answered = True
+        result = check_answer(choice, ans, st.session_state.mode)
+
+        if result is None:
+            st.session_state.feedback = "⚠️ 먼저 정답을 입력하거나 선택하세요!"
+        elif result:
+            st.session_state.feedback = "✅ 정답입니다!"
+            st.session_state.score += 1
         else:
-            st.session_state.checked = True
-            if choice == st.session_state.ans:
-                st.success("✅ 정답입니다!")
-                st.session_state.score += 1
-            else:
-                st.error(f"❌ 오답입니다. 정답은 [{st.session_state.ans}] 입니다.")
-            st.session_state.show_next = True
+            st.session_state.feedback = f"❌ 오답입니다. 정답은 [{ans}] 입니다."
+            st.session_state.wrong_list.append({"문제": q, "정답": ans, "내답": choice})
 
-    # 다음 문제로 이동
-    if st.session_state.get("checked", False) and st.session_state.get("show_next", False):
-        if st.button("➡️ 다음 문제로"):
-            st.session_state.checked = False
-            st.session_state.show_next = False
-            st.session_state.cur_q += 1
-            st.session_state.q = None
-            st.rerun()
+    # 피드백 표시
+    if st.session_state.feedback:
+        if st.session_state.feedback.startswith("✅"):
+            st.success(st.session_state.feedback)
+        elif st.session_state.feedback.startswith("❌"):
+            st.error(st.session_state.feedback)
+        else:
+            st.warning(st.session_state.feedback)
 
-# ===== 결과 =====
+    # 다음 문제로
+    if st.session_state.answered and st.button("➡️ 다음 문제"):
+        st.session_state.cur_idx += 1
+        st.session_state.feedback = ""
+        st.session_state.answered = False
+        st.session_state.q_data = None
+        st.rerun()
+
+
+# ==============================
+# 📊 결과 화면
+# ==============================
 if st.session_state.phase == "result":
     st.success("🎉 퀴즈 완료!")
-    st.write(f"총 {st.session_state.num_q}문제 중 {st.session_state.score}개 정답 ✅")
-    rate = (st.session_state.score / st.session_state.num_q) * 100
+    total = len(st.session_state.terms)
+    score = st.session_state.score
+    rate = score / total * 100
+    st.write(f"총 {total}문제 중 {score}개 정답 ✅")
     st.write(f"정답률: {rate:.1f}%")
 
-    if st.button("다시 하기"):
-        for k in list(st.session_state.keys()):
-            del st.session_state[k]
+    if st.session_state.wrong_list:
+        if st.button("📘 오답 확인"):
+            st.session_state.phase = "review"
+            st.rerun()
+
+    if st.button("🔁 다시 하기"):
+        for key in default_state:
+            st.session_state[key] = default_state[key]
+        st.rerun()
+
+
+# ==============================
+# 🧾 오답 복습
+# ==============================
+if st.session_state.phase == "review":
+    st.error("📘 오답 노트")
+    for i, item in enumerate(st.session_state.wrong_list, 1):
+        st.markdown(f"**{i}. {item['문제']}**")
+        st.write(f"👉 정답: {item['정답']}")
+        st.write(f"❌ 내 답: {item['내답']}")
+        st.divider()
+
+    if st.button("🔁 다시 하기"):
+        for key in default_state:
+            st.session_state[key] = default_state[key]
         st.rerun()
